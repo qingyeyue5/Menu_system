@@ -536,9 +536,43 @@ button:disabled {
 }
 
 .admin-list,
+.admin-category-list,
 .device-list {
   display: grid;
   gap: 12px;
+}
+
+.admin-category {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.admin-category-head {
+  width: 100%;
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 0 14px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.07);
+  text-align: left;
+}
+
+.admin-category-head span,
+.admin-category-head em {
+  color: var(--subtle);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.admin-category-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
 }
 
 .admin-card {
@@ -613,6 +647,45 @@ button:disabled {
   color: var(--ink);
   background: rgba(12, 13, 12, 0.96);
   box-shadow: var(--shadow);
+}
+
+.loading {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  align-content: center;
+  color: var(--ink);
+  background: rgba(7, 9, 8, 0.58);
+}
+
+.loading[hidden] {
+  display: none;
+}
+
+.spinner {
+  width: 38px;
+  height: 38px;
+  border: 3px solid rgba(255, 248, 238, 0.22);
+  border-top-color: var(--gold-strong);
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+}
+
+.loading-text {
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.34);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .empty {

@@ -3,6 +3,7 @@ const DEVICE_KEY = "private-dining-device-v2";
 
 const app = document.querySelector("#app");
 const toastEl = document.querySelector("#toast");
+const loadingEl = document.querySelector("#loading");
 const MAX_IMAGE_EDGE = 900;
 const IMAGE_QUALITY = 0.78;
 
@@ -32,6 +33,8 @@ const ui = {
   note: "",
   eventSource: null,
   lastPendingIds: new Set(),
+  loadingCount: 0,
+  collapsedAdminCategories: JSON.parse(localStorage.getItem("private-dining-collapsed-admin-cats-v1") || "{}"),
 };
 
 localStorage.setItem(DEVICE_KEY, ui.deviceId);
@@ -72,7 +75,7 @@ function statusText(status) {
 }
 
 function roleText(role) {
-  return role === "admin" ? "我这一端" : "她那一端";
+  return role === "admin" ? "宝宝" : "宝贝";
 }
 
 function toast(message) {
@@ -82,6 +85,18 @@ function toast(message) {
   toastEl.timer = setTimeout(() => {
     toastEl.hidden = true;
   }, 2400);
+}
+
+function showLoading(message = "加载中") {
+  ui.loadingCount += 1;
+  if (!loadingEl) return;
+  loadingEl.querySelector(".loading-text").textContent = message;
+  loadingEl.hidden = false;
+}
+
+function hideLoading() {
+  ui.loadingCount = Math.max(0, ui.loadingCount - 1);
+  if (loadingEl && ui.loadingCount === 0) loadingEl.hidden = true;
 }
 
 function saveAuth(auth) {
@@ -100,21 +115,34 @@ function logout() {
 
 async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  const silentLoading = options.silentLoading === true;
+  const loadingMessage = options.loadingMessage || "加载中";
+  if (!silentLoading) showLoading(loadingMessage);
   if (ui.auth) {
     headers["X-Role"] = ui.auth.role;
     headers["X-Device-Id"] = ui.auth.deviceId;
     headers["X-Auth-Token"] = ui.auth.token;
   }
-  const response = await fetch(path, { ...options, headers });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "操作失败");
-  return data;
+  try {
+    const fetchOptions = { ...options, headers };
+    delete fetchOptions.silentLoading;
+    delete fetchOptions.loadingMessage;
+    const response = await fetch(path, fetchOptions);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "操作失败");
+    return data;
+  } finally {
+    if (!silentLoading) hideLoading();
+  }
 }
 
 async function loadState(silent = false) {
   if (!ui.auth) return;
   try {
-    ui.state = await api("/api/state");
+    ui.state = await api("/api/state", {
+      silentLoading: silent,
+      loadingMessage: "加载菜单中",
+    });
     ensureSelectedCategory();
     detectNewOrders();
     render();
@@ -155,6 +183,7 @@ async function login(event) {
   try {
     const data = await api("/api/auth", {
       method: "POST",
+      loadingMessage: "正在进入",
       body: JSON.stringify({
         role: ui.loginRole,
         password: form.get("password"),
@@ -181,7 +210,7 @@ function shell(content) {
           <div>
             <div class="brand-kicker">${escapeHtml(state.restaurant.subtitle)}</div>
             <h1>${escapeHtml(state.restaurant.name)}</h1>
-            <p>${ui.auth.role === "admin" ? "主理人工作台" : "今晚想吃什么"}</p>
+            <p>${ui.auth.role === "admin" ? "宝宝工作台" : "宝贝点餐台"}</p>
           </div>
           <div class="header-actions">
             <span class="badge">${roleText(ui.auth.role)}</span>
@@ -202,8 +231,8 @@ function renderLogin() {
         <h1 class="title">私宴菜单</h1>
         <p class="subtitle">每台手机或浏览器首次输入密码后会完成安全绑定，之后同一设备不用重复确认。</p>
         <div class="segmented">
-          <button class="${ui.loginRole === "customer" ? "active" : ""}" onclick="setLoginRole('customer')">她那一端</button>
-          <button class="${ui.loginRole === "admin" ? "active" : ""}" onclick="setLoginRole('admin')">我这一端</button>
+          <button class="${ui.loginRole === "customer" ? "active" : ""}" onclick="setLoginRole('customer')">宝贝</button>
+          <button class="${ui.loginRole === "admin" ? "active" : ""}" onclick="setLoginRole('admin')">宝宝</button>
         </div>
         <form onsubmit="login(event)">
           <label class="field">
@@ -267,6 +296,7 @@ function renderAdminOrders() {
 function renderMenuAdmin() {
   const categories = ui.state.menu.categories;
   const items = ui.state.menu.items;
+  const uncategorized = items.filter((item) => !categories.some((category) => category.id === item.categoryId));
   return `
     <div class="grid">
       <section class="panel">
@@ -301,12 +331,36 @@ function renderMenuAdmin() {
       </section>
       <section>
         <div class="section-title"><h2>菜品管理</h2><span class="badge">${items.length} 道</span></div>
-        <div class="admin-list">
-          ${items.map((item) => `<div class="admin-card">${itemForm(item.id, item, categories)}</div>`).join("") || empty("还没有菜品")}
+        <div class="admin-category-list">
+          ${categories.map((category) => adminCategoryBlock(category, items.filter((item) => item.categoryId === category.id), categories)).join("")}
+          ${uncategorized.length ? adminCategoryBlock({ id: "uncategorized", name: "未分类" }, uncategorized, categories) : ""}
+          ${items.length ? "" : empty("还没有菜品")}
         </div>
       </section>
     </div>
   `;
+}
+
+function adminCategoryBlock(category, items, categories) {
+  const collapsed = ui.collapsedAdminCategories[category.id] === true;
+  return `
+    <section class="admin-category">
+      <button class="admin-category-head" type="button" onclick="toggleAdminCategory('${category.id}')">
+        <span>${collapsed ? "展开" : "收起"}</span>
+        <strong>${escapeHtml(category.name)}</strong>
+        <em>${items.length} 道</em>
+      </button>
+      <div class="admin-category-body" ${collapsed ? "hidden" : ""}>
+        ${items.map((item) => `<div class="admin-card">${itemForm(item.id, item, categories)}</div>`).join("") || empty("这个分类还没有菜品")}
+      </div>
+    </section>
+  `;
+}
+
+function toggleAdminCategory(id) {
+  ui.collapsedAdminCategories[id] = ui.collapsedAdminCategories[id] !== true;
+  localStorage.setItem("private-dining-collapsed-admin-cats-v1", JSON.stringify(ui.collapsedAdminCategories));
+  render();
 }
 
 function itemForm(idValue, item, categories) {
@@ -365,8 +419,8 @@ function renderSecurity() {
       <section class="panel">
         <h2>修改密码</h2>
         <form onsubmit="savePasswords(event)">
-          <label class="field"><span>新的我这一端密码</span><input class="input" name="adminPassword" type="password" autocomplete="new-password" /></label>
-          <label class="field"><span>新的她那一端密码</span><input class="input" name="customerPassword" type="password" autocomplete="new-password" /></label>
+          <label class="field"><span>新的宝宝密码</span><input class="input" name="adminPassword" type="password" autocomplete="new-password" /></label>
+          <label class="field"><span>新的宝贝密码</span><input class="input" name="customerPassword" type="password" autocomplete="new-password" /></label>
           <button class="primary form-submit">保存密码</button>
         </form>
       </section>
@@ -659,6 +713,7 @@ async function submitOrder() {
   try {
     const data = await api("/api/orders", {
       method: "POST",
+      loadingMessage: "正在下单",
       body: JSON.stringify({
         items: cartLines().map((line) => ({ itemId: line.item.id, quantity: line.quantity })),
         serviceMode: ui.serviceMode,
@@ -693,7 +748,11 @@ function repeatOrder(orderId) {
 async function orderAction(orderId, action) {
   try {
     const body = action === "cancel" ? JSON.stringify({ reason: "手动取消" }) : undefined;
-    ui.state = await api(`/api/orders/${orderId}/${action}`, { method: "POST", body });
+    ui.state = await api(`/api/orders/${orderId}/${action}`, {
+      method: "POST",
+      body,
+      loadingMessage: action === "accept" ? "正在接收" : action === "complete" ? "正在完成" : "正在取消",
+    });
     toast(action === "accept" ? "已接收订单" : action === "complete" ? "订单已完成" : "已取消订单");
     render();
   } catch (error) {
@@ -812,7 +871,11 @@ function fileToDataUrl(file) {
 
 async function mutate(path, payload, message = "已保存", method = "POST") {
   try {
-    ui.state = await api(path, { method, body: JSON.stringify(payload) });
+    ui.state = await api(path, {
+      method,
+      body: JSON.stringify(payload),
+      loadingMessage: "正在保存",
+    });
     ensureSelectedCategory();
     toast(message);
     render();
@@ -864,13 +927,14 @@ window.removeDevice = removeDevice;
 window.addCategory = addCategory;
 window.renameCategory = renameCategory;
 window.deleteCategory = deleteCategory;
+window.toggleAdminCategory = toggleAdminCategory;
 window.addItem = addItem;
 window.saveItem = saveItem;
 window.deleteItem = deleteItem;
 window.ui = ui;
 
 if (ui.auth) {
-  loadState(true).then(connectEvents);
+  loadState(false).then(connectEvents);
 } else {
   renderLogin();
 }

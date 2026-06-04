@@ -8,6 +8,7 @@ const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const DATA_DIR = path.join(ROOT, "data");
 const STORE_FILE = path.join(DATA_DIR, "store.json");
+const LOCAL_PASSWORD_FILE = path.join(DATA_DIR, "local-passwords.json");
 const PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 
 const MIME = {
@@ -95,27 +96,39 @@ function randomInitialPassword() {
   return crypto.randomBytes(12).toString("base64url");
 }
 
+function readLocalPasswords() {
+  try {
+    const passwords = JSON.parse(fs.readFileSync(LOCAL_PASSWORD_FILE, "utf8"));
+    if (typeof passwords.adminPassword === "string" && typeof passwords.customerPassword === "string") {
+      return passwords;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function writeLocalPasswords(passwords) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(LOCAL_PASSWORD_FILE, JSON.stringify(passwords, null, 2), "utf8");
+}
+
+const savedCredentials = readLocalPasswords();
 const initialCredentials = {
-  adminPassword: process.env.ADMIN_PASSWORD || randomInitialPassword(),
-  customerPassword: process.env.CUSTOMER_PASSWORD || randomInitialPassword(),
-  generatedAdmin: !process.env.ADMIN_PASSWORD,
-  generatedCustomer: !process.env.CUSTOMER_PASSWORD,
+  adminPassword: process.env.ADMIN_PASSWORD || savedCredentials?.adminPassword || randomInitialPassword(),
+  customerPassword: process.env.CUSTOMER_PASSWORD || savedCredentials?.customerPassword || randomInitialPassword(),
+  generatedAdmin: !process.env.ADMIN_PASSWORD && !savedCredentials?.adminPassword,
+  generatedCustomer: !process.env.CUSTOMER_PASSWORD && !savedCredentials?.customerPassword,
 };
 
-function printInitialCredentials() {
+function printStartupCredentials(reason = "") {
+  const passwords = readLocalPasswords() || initialCredentials;
   console.log("");
-  console.log("首次启动已创建本机数据文件。请使用下面的初始口令登录，然后尽快在“安全”里修改：");
-  if (initialCredentials.generatedAdmin) {
-    console.log(`我这一端初始口令：${initialCredentials.adminPassword}`);
-  } else {
-    console.log("我这一端初始口令：使用 ADMIN_PASSWORD 环境变量");
-  }
-  if (initialCredentials.generatedCustomer) {
-    console.log(`她那一端初始口令：${initialCredentials.customerPassword}`);
-  } else {
-    console.log("她那一端初始口令：使用 CUSTOMER_PASSWORD 环境变量");
-  }
-  console.log("这些口令不会写入 Git 仓库；本机 data/store.json 已被忽略。");
+  console.log("当前登录密码：");
+  console.log(`宝宝密码：${passwords.adminPassword}`);
+  console.log(`宝贝密码：${passwords.customerPassword}`);
+  if (reason) console.log(reason);
+  console.log("密码明文只保存在本机 data/local-passwords.json；该文件不会上传 GitHub。");
   console.log("");
 }
 
@@ -143,8 +156,25 @@ function ensureStore() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(STORE_FILE)) {
     fs.writeFileSync(STORE_FILE, JSON.stringify(defaultStore(), null, 2), "utf8");
-    printInitialCredentials();
+    writeLocalPasswords({
+      adminPassword: initialCredentials.adminPassword,
+      customerPassword: initialCredentials.customerPassword,
+    });
+    return { created: true, passwordsReset: false };
   }
+  if (!readLocalPasswords()) {
+    const store = normalizeStore(JSON.parse(fs.readFileSync(STORE_FILE, "utf8")));
+    store.security.adminPassword = makePassword(initialCredentials.adminPassword);
+    store.security.customerPassword = makePassword(initialCredentials.customerPassword);
+    store.security.trustedDevices = [];
+    writeStore(store);
+    writeLocalPasswords({
+      adminPassword: initialCredentials.adminPassword,
+      customerPassword: initialCredentials.customerPassword,
+    });
+    return { created: false, passwordsReset: true };
+  }
+  return { created: false, passwordsReset: false };
 }
 
 function normalizeStore(store) {
@@ -424,8 +454,22 @@ async function handleApi(req, res, url) {
       authed.store.restaurant.name = sanitizeText(body.restaurant.name, authed.store.restaurant.name).slice(0, 40);
       authed.store.restaurant.subtitle = sanitizeText(body.restaurant.subtitle, authed.store.restaurant.subtitle).slice(0, 80);
     }
-    if (body.adminPassword) authed.store.security.adminPassword = makePassword(String(body.adminPassword));
-    if (body.customerPassword) authed.store.security.customerPassword = makePassword(String(body.customerPassword));
+    const localPasswords = readLocalPasswords() || {
+      adminPassword: initialCredentials.adminPassword,
+      customerPassword: initialCredentials.customerPassword,
+    };
+    let passwordChanged = false;
+    if (body.adminPassword) {
+      localPasswords.adminPassword = String(body.adminPassword);
+      authed.store.security.adminPassword = makePassword(localPasswords.adminPassword);
+      passwordChanged = true;
+    }
+    if (body.customerPassword) {
+      localPasswords.customerPassword = String(body.customerPassword);
+      authed.store.security.customerPassword = makePassword(localPasswords.customerPassword);
+      passwordChanged = true;
+    }
+    if (passwordChanged) writeLocalPasswords(localPasswords);
     writeStore(authed.store);
     broadcast();
     return sendJson(res, 200, publicState(authed.store, "admin", authed.auth.deviceId));
@@ -649,7 +693,12 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-ensureStore();
+const storeStatus = ensureStore();
+printStartupCredentials(
+  storeStatus.passwordsReset
+    ? "提示：旧数据没有可展示的明文密码记录，已自动重置两边密码并清空设备绑定。"
+    : ""
+);
 setInterval(expirePendingOrders, 10 * 1000);
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`点菜系统已启动：http://localhost:${PORT}`);

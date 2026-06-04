@@ -2,7 +2,9 @@ node_modules/
 npm-debug.log*
 .env
 data/store.json
+data/local-passwords.json
 data/*.broken-*
 data/INITIAL_PASSWORDS*
+cloudflared-fixed.yml
 .DS_Store
 Thumbs.db

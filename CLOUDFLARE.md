@@ -43,10 +43,32 @@ https://xxxx.trycloudflare.com
 https://menu.example.com
 ```
 
-需要在 Cloudflare Zero Trust 里创建正式 Tunnel，并把 Public Hostname 指到：
+前提：这个域名已经添加到 Cloudflare。
+
+第一次设置时双击：
+
+```text
+setup-fixed-tunnel.cmd
+```
+
+按窗口提示输入固定网址，例如：
+
+```text
+menu.example.com
+```
+
+设置成功后，以后每天直接双击：
+
+```text
+start-all-fixed-tunnel.cmd
+```
+
+固定网址会指到本机服务：
 
 ```text
 http://localhost:3000
 ```
 
 当前项目不需要改代码。
+
+如果你没有自己的域名，`trycloudflare.com` 临时地址不能固定，只能每次复制新的临时地址。
