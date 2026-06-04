@@ -2,6 +2,12 @@
 
 ## 临时测试地址
 
+先确认已经安装系统版 Cloudflare Tunnel：
+
+```powershell
+winget install --id Cloudflare.cloudflared
+```
+
 直接双击：
 
 ```text
@@ -27,6 +33,7 @@ https://xxxx.trycloudflare.com
 - 电脑不能关机或断网。
 - 临时地址可能每次启动都会变。
 - 第一次启动菜单系统时，窗口里会显示初始口令；登录后请到“安全”里修改。
+- 如果提示找不到 `cloudflared`，请关掉窗口重开；仍不行就重启一次 Windows，让系统 PATH 刷新。
 
 ## 固定地址
 

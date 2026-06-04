@@ -61,6 +61,8 @@ start-all-quick-tunnel.cmd
 
 它会同时打开菜单系统和 Cloudflare Tunnel。把 Tunnel 窗口里显示的 `https://xxxx.trycloudflare.com` 地址发给对方即可。
 
+Cloudflare Tunnel 使用系统安装版 `cloudflared`。如果脚本提示找不到 `cloudflared`，请关掉窗口重开；仍不行就重启一次 Windows。
+
 拿到公网地址后，两个人都访问同一个地址即可，例如：
 
 ```text
