@@ -7,12 +7,21 @@ echo.
 echo Keep this window open. Copy the https://*.trycloudflare.com address and share it.
 echo.
 
+set "CLOUDFLARED=cloudflared"
 where cloudflared >nul 2>nul
-if not errorlevel 1 (
-  cloudflared tunnel --url http://localhost:3000
-  goto done
+if errorlevel 1 (
+  for /f "delims=" %%i in ('dir /b /s "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Cloudflare.cloudflared_*\cloudflared.exe" 2^>nul') do (
+    set "CLOUDFLARED=%%i"
+    goto found_cloudflared
+  )
+  goto missing_cloudflared
 )
 
+:found_cloudflared
+"%CLOUDFLARED%" tunnel --url http://localhost:3000
+goto done
+
+:missing_cloudflared
 echo Cloudflare Tunnel could not start.
 echo.
 echo System cloudflared was not found.
