@@ -4,5 +4,7 @@ npm-debug.log*
 data/store.json
 data/*.broken-*
 data/INITIAL_PASSWORDS*
+tools/cloudflared.exe
+tools/*.log
 .DS_Store
 Thumbs.db
