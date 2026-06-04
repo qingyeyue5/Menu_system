@@ -1,11 +1,19 @@
-# 点菜系统
+# 私宴点菜系统
 
 这是一个双端网页点菜系统：你这一端负责菜单设置、接单、完成订单；她那一端负责选菜、预约/备注、下单和查看订单状态。
 
 ## 启动
 
+推荐直接双击：
+
+```text
+start-menu.cmd
+```
+
+也可以在命令行里运行：
+
 ```powershell
-npm start
+node server.js
 ```
 
 本机打开：
@@ -23,7 +31,7 @@ npm start
 ```powershell
 $env:ADMIN_PASSWORD="你自己设置的管理端口令"
 $env:CUSTOMER_PASSWORD="你自己设置的顾客端口令"
-npm start
+node server.js
 ```
 
 每台手机或浏览器第一次输入口令后会绑定设备，之后同一设备不用重复输入；你也可以在“安全”里移除已绑定设备。
@@ -44,6 +52,14 @@ npm start
 - 部署到云服务器，然后用域名或公网 IP 访问。
 - 使用内网穿透工具把本机 `3000` 端口映射到公网地址。
 - 部署到支持 Node.js 的平台。
+
+当前项目已经准备了 Cloudflare 临时隧道脚本。双击：
+
+```text
+start-all-quick-tunnel.cmd
+```
+
+它会同时打开菜单系统和 Cloudflare Tunnel。把 Tunnel 窗口里显示的 `https://xxxx.trycloudflare.com` 地址发给对方即可。
 
 拿到公网地址后，两个人都访问同一个地址即可，例如：
 
