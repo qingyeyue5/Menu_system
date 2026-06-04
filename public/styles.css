@@ -32,7 +32,8 @@ body {
   background:
     radial-gradient(circle at 82% 16%, rgba(216, 180, 106, 0.2), transparent 28%),
     linear-gradient(90deg, rgba(7, 9, 8, 0.94), rgba(7, 9, 8, 0.5)),
-    url("/assets/restaurant-bg.png") center / cover fixed;
+    url("/assets/restaurant-bg.png") center / cover;
+  background-attachment: scroll;
   color: var(--ink);
 }
 
@@ -77,7 +78,6 @@ button:disabled {
   border-radius: 8px;
   background: linear-gradient(180deg, rgba(18, 21, 19, 0.93), rgba(18, 21, 19, 0.78));
   box-shadow: var(--shadow);
-  backdrop-filter: blur(22px);
 }
 
 .brand-kicker {
@@ -280,8 +280,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(18px);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.2);
 }
 
 .panel {
@@ -355,6 +354,7 @@ button:disabled {
 .dish-card {
   overflow: hidden;
   background: linear-gradient(180deg, rgba(25, 56, 47, 0.68), rgba(13, 14, 13, 0.88));
+  contain: content;
 }
 
 .dish-image {
@@ -624,6 +624,13 @@ button:disabled {
 }
 
 @media (max-width: 820px) {
+  body {
+    background:
+      linear-gradient(90deg, rgba(7, 9, 8, 0.95), rgba(7, 9, 8, 0.7)),
+      url("/assets/restaurant-bg.png") center top / auto 100vh no-repeat,
+      #070908;
+  }
+
   .shell {
     padding: 14px;
   }

@@ -3,12 +3,15 @@ const DEVICE_KEY = "private-dining-device-v2";
 
 const app = document.querySelector("#app");
 const toastEl = document.querySelector("#toast");
+const MAX_IMAGE_EDGE = 900;
+const IMAGE_QUALITY = 0.78;
 
 function makeClientId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const cryptoApi = window.crypto || window.msCrypto;
+  if (cryptoApi && cryptoApi.randomUUID) return cryptoApi.randomUUID();
   const bytes = new Uint8Array(16);
-  if (globalThis.crypto?.getRandomValues) {
-    globalThis.crypto.getRandomValues(bytes);
+  if (cryptoApi && cryptoApi.getRandomValues) {
+    cryptoApi.getRandomValues(bytes);
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -138,7 +141,7 @@ function connectEvents() {
 }
 
 function detectNewOrders() {
-  if (!ui.state || ui.auth?.role !== "admin") return;
+  if (!ui.state || !ui.auth || ui.auth.role !== "admin") return;
   const pending = ui.state.orders.filter((order) => order.status === "pending").map((order) => order.id);
   const next = new Set(pending);
   const hasNew = pending.some((id) => !ui.lastPendingIds.has(id));
@@ -308,7 +311,9 @@ function renderMenuAdmin() {
 
 function itemForm(idValue, item, categories) {
   const isNew = idValue === "new";
-  const imagePreview = item.image ? `<img class="thumb" src="${item.image}" alt="${attr(item.name || "菜品图片")}" />` : "";
+  const imagePreview = item.image
+    ? `<img class="thumb" src="${item.image}" alt="${attr(item.name || "菜品图片")}" loading="lazy" decoding="async" />`
+    : "";
   return `
     <form class="form-grid" onsubmit="${isNew ? "addItem(event)" : `saveItem(event, '${idValue}')`}">
       <label class="field">
@@ -323,7 +328,7 @@ function itemForm(idValue, item, categories) {
       </label>
       <label class="field">
         <span>价格</span>
-        <input class="input" name="price" type="number" min="0" step="0.01" value="${attr(item.price ?? 0)}" />
+        <input class="input" name="price" type="number" min="0" step="0.01" value="${attr(item.price != null ? item.price : 0)}" />
       </label>
       <label class="field">
         <span>图片</span>
@@ -411,7 +416,7 @@ function setCustomerTab(tab) {
 function renderMenu() {
   const categories = ui.state.menu.categories;
   const items = ui.state.menu.items.filter((item) => item.active);
-  const selected = ui.selectedCategory || categories[0]?.id || "";
+  const selected = ui.selectedCategory || (categories[0] ? categories[0].id : "");
   const selectedItems = items.filter((item) => item.categoryId === selected);
   return `
     <div class="menu-layout">
@@ -430,7 +435,7 @@ function dishCard(item) {
   const qty = ui.cart[item.id] || 0;
   return `
     <article class="dish-card">
-      <div class="dish-image">${item.image ? `<img src="${item.image}" alt="${attr(item.name)}" />` : ""}</div>
+      <div class="dish-image">${item.image ? `<img src="${item.image}" alt="${attr(item.name)}" loading="lazy" decoding="async" />` : ""}</div>
       <div class="dish-body">
         <div class="dish-name">
           <h3>${escapeHtml(item.name)}</h3>
@@ -531,7 +536,10 @@ function orderCard(order, role) {
   const schedule = order.serviceMode === "scheduled" ? `<div class="small">预约：${escapeHtml(order.scheduledAt || "未填写")}</div>` : "";
   const reason = order.cancelReason ? `<div class="small">原因：${escapeHtml(order.cancelReason)}</div>` : "";
   const actions = role === "admin" ? adminOrderActions(order) : customerOrderActions(order);
-  const countdown = order.status === "pending" ? `<div class="small">接单倒计时：${pendingLeft(order)}</div>` : "";
+  const countdown =
+    order.status === "pending"
+      ? `<div class="small">接单倒计时：<span data-countdown="${attr(order.expiresAt)}">${pendingLeft(order.expiresAt)}</span></div>`
+      : "";
   return `
     <article class="order-card">
       <div class="order-head">
@@ -569,12 +577,18 @@ function orderCard(order, role) {
   `;
 }
 
-function pendingLeft(order) {
-  const ms = new Date(order.expiresAt).getTime() - Date.now();
+function pendingLeft(expiresAt) {
+  const ms = new Date(expiresAt).getTime() - Date.now();
   if (ms <= 0) return "即将自动取消";
   const minute = Math.floor(ms / 60000);
   const second = Math.floor((ms % 60000) / 1000);
   return `${minute}:${String(second).padStart(2, "0")}`;
+}
+
+function updateCountdowns() {
+  document.querySelectorAll("[data-countdown]").forEach((node) => {
+    node.textContent = pendingLeft(node.dataset.countdown);
+  });
 }
 
 function adminOrderActions(order) {
@@ -600,9 +614,9 @@ function empty(text) {
 }
 
 function ensureSelectedCategory() {
-  const categories = ui.state?.menu?.categories || [];
+  const categories = ui.state && ui.state.menu ? ui.state.menu.categories : [];
   if (!categories.some((category) => category.id === ui.selectedCategory)) {
-    ui.selectedCategory = categories[0]?.id || "";
+    ui.selectedCategory = categories[0] ? categories[0].id : "";
   }
 }
 
@@ -720,7 +734,7 @@ async function addCategory(event) {
 
 async function renameCategory(id) {
   const category = ui.state.menu.categories.find((entry) => entry.id === id);
-  const name = prompt("新的分类名称", category?.name || "");
+  const name = prompt("新的分类名称", category ? category.name : "");
   if (!name) return;
   await mutate(`/api/categories/${id}`, { name }, "分类已重命名", "PATCH");
 }
@@ -764,8 +778,33 @@ async function formToItem(form) {
 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("请选择图片文件"));
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(image.width, image.height));
+          const width = Math.max(1, Math.round(image.width * scale));
+          const height = Math.max(1, Math.round(image.height * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext("2d");
+          context.fillStyle = "#11120f";
+          context.fillRect(0, 0, width, height);
+          context.drawImage(image, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", IMAGE_QUALITY));
+        } catch {
+          resolve(reader.result);
+        }
+      };
+      image.onerror = () => resolve(reader.result);
+      image.src = reader.result;
+    };
     reader.onerror = () => reject(new Error("图片读取失败"));
     reader.readAsDataURL(file);
   });
@@ -783,12 +822,12 @@ async function mutate(path, payload, message = "已保存", method = "POST") {
 }
 
 function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function attr(value) {
@@ -803,7 +842,7 @@ function render() {
 }
 
 setInterval(() => {
-  if (ui.state?.orders?.some((order) => order.status === "pending")) render();
+  if (ui.state && ui.state.orders && ui.state.orders.some((order) => order.status === "pending")) updateCountdowns();
 }, 1000);
 
 window.login = login;
