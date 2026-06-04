@@ -6,5 +6,6 @@ data/local-passwords.json
 data/*.broken-*
 data/INITIAL_PASSWORDS*
 cloudflared-fixed.yml
+public/uploads/
 .DS_Store
 Thumbs.db

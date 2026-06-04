@@ -6,10 +6,13 @@ const crypto = require("crypto");
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
+const UPLOAD_DIR = path.join(PUBLIC_DIR, "uploads");
 const DATA_DIR = path.join(ROOT, "data");
 const STORE_FILE = path.join(DATA_DIR, "store.json");
 const LOCAL_PASSWORD_FILE = path.join(DATA_DIR, "local-passwords.json");
 const PENDING_TIMEOUT_MS = 5 * 60 * 1000;
+const DEVICE_SEEN_WRITE_MS = 60 * 1000;
+let storeCache = null;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -92,6 +95,11 @@ function verifyPassword(password, record) {
   return Boolean(record && password && hashPassword(password, record.salt) === record.hash);
 }
 
+function ensureDirs() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
 function randomInitialPassword() {
   return crypto.randomBytes(12).toString("base64url");
 }
@@ -109,8 +117,50 @@ function readLocalPasswords() {
 }
 
 function writeLocalPasswords(passwords) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  ensureDirs();
   fs.writeFileSync(LOCAL_PASSWORD_FILE, JSON.stringify(passwords, null, 2), "utf8");
+}
+
+function storeImageDataUrl(image, itemId) {
+  if (!image || typeof image !== "string" || !image.startsWith("data:image/")) return image || "";
+  const match = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return "";
+  const mime = match[1].toLowerCase();
+  const ext =
+    mime === "image/png" ? "png" :
+    mime === "image/webp" ? "webp" :
+    mime === "image/gif" ? "gif" :
+    "jpg";
+  const bytes = Buffer.from(match[2], "base64");
+  if (!bytes.length || bytes.length > 8 * 1024 * 1024) return "";
+  ensureDirs();
+  const safeId = String(itemId || "item").replace(/[^a-zA-Z0-9_-]/g, "");
+  const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+  const fileName = `${safeId}_${hash}.${ext}`;
+  fs.writeFileSync(path.join(UPLOAD_DIR, fileName), bytes);
+  return `/uploads/${fileName}`;
+}
+
+function migrateStoreImages(store) {
+  let changed = false;
+  for (const item of store.menu.items) {
+    if (typeof item.image === "string" && item.image.startsWith("data:image/")) {
+      const saved = storeImageDataUrl(item.image, item.id);
+      if (saved) {
+        item.image = saved;
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
+function markDeviceSeen(store, device) {
+  const lastSeenAt = device.lastSeenAt ? new Date(device.lastSeenAt).getTime() : 0;
+  if (!Number.isFinite(lastSeenAt) || Date.now() - lastSeenAt > DEVICE_SEEN_WRITE_MS) {
+    device.lastSeenAt = nowIso();
+    writeStore(store);
+  }
 }
 
 const savedCredentials = readLocalPasswords();
@@ -153,9 +203,10 @@ function defaultStore() {
 }
 
 function ensureStore() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  ensureDirs();
   if (!fs.existsSync(STORE_FILE)) {
-    fs.writeFileSync(STORE_FILE, JSON.stringify(defaultStore(), null, 2), "utf8");
+    storeCache = defaultStore();
+    fs.writeFileSync(STORE_FILE, JSON.stringify(storeCache, null, 2), "utf8");
     writeLocalPasswords({
       adminPassword: initialCredentials.adminPassword,
       customerPassword: initialCredentials.customerPassword,
@@ -164,6 +215,7 @@ function ensureStore() {
   }
   if (!readLocalPasswords()) {
     const store = normalizeStore(JSON.parse(fs.readFileSync(STORE_FILE, "utf8")));
+    migrateStoreImages(store);
     store.security.adminPassword = makePassword(initialCredentials.adminPassword);
     store.security.customerPassword = makePassword(initialCredentials.customerPassword);
     store.security.trustedDevices = [];
@@ -201,9 +253,13 @@ function normalizeStore(store) {
 }
 
 function readStore() {
+  if (storeCache) return storeCache;
   ensureStore();
   try {
-    return normalizeStore(JSON.parse(fs.readFileSync(STORE_FILE, "utf8")));
+    const store = normalizeStore(JSON.parse(fs.readFileSync(STORE_FILE, "utf8")));
+    storeCache = store;
+    if (migrateStoreImages(store)) writeStore(store);
+    return store;
   } catch {
     const backup = `${STORE_FILE}.broken-${Date.now()}`;
     try {
@@ -218,6 +274,7 @@ function readStore() {
 }
 
 function writeStore(store) {
+  storeCache = store;
   fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), "utf8");
 }
 
@@ -379,7 +436,11 @@ function serveStatic(req, res, pathname) {
       res.end("Not found");
       return;
     }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+    const headers = { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" };
+    if (safePath.startsWith("/uploads/") || safePath.startsWith("/assets/")) {
+      headers["Cache-Control"] = "public, max-age=31536000, immutable";
+    }
+    res.writeHead(200, headers);
     res.end(content);
   });
 }
@@ -423,8 +484,7 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && pathname === "/api/state") {
     const authed = requireAuth(req, query);
     if (!authed) return sendJson(res, 401, { error: "需要重新验证" });
-    authed.device.lastSeenAt = nowIso();
-    writeStore(authed.store);
+    markDeviceSeen(authed.store, authed.device);
     return sendJson(res, 200, publicState(authed.store, authed.auth.role, authed.auth.deviceId));
   }
 
@@ -537,9 +597,10 @@ async function handleApi(req, res, url) {
       name: sanitizeText(body.name, "新菜品").slice(0, 40),
       description: sanitizeText(body.description).slice(0, 240),
       price: sanitizePrice(body.price),
-      image: String(body.image || ""),
+      image: "",
       active: body.active !== false,
     };
+    item.image = storeImageDataUrl(String(body.image || ""), item.id);
     if (!authed.store.menu.categories.some((category) => category.id === item.categoryId)) {
       item.categoryId = authed.store.menu.categories[0]?.id || "";
     }
@@ -560,7 +621,7 @@ async function handleApi(req, res, url) {
     if ("name" in body) item.name = sanitizeText(body.name, item.name).slice(0, 40);
     if ("description" in body) item.description = sanitizeText(body.description, item.description).slice(0, 240);
     if ("price" in body) item.price = sanitizePrice(body.price);
-    if ("image" in body) item.image = String(body.image || "");
+    if ("image" in body) item.image = storeImageDataUrl(String(body.image || ""), item.id);
     if ("active" in body) item.active = body.active !== false;
     if (!authed.store.menu.categories.some((category) => category.id === item.categoryId)) {
       item.categoryId = authed.store.menu.categories[0]?.id || "";

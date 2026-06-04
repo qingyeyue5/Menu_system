@@ -20,7 +20,8 @@ if errorlevel 1 (
 
 if not exist "cloudflared-fixed.yml" (
   echo cloudflared-fixed.yml was not found.
-  echo Run setup-fixed-tunnel.cmd first.
+  echo The fixed tunnel config is missing.
+  echo Ask Codex to recreate it for menu.qingyeyue.xyz.
   echo.
   pause
   exit /b 1
