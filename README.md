@@ -47,6 +47,14 @@ data/local-passwords.json
 
 这个文件不会上传 GitHub。进入宝宝端后，可以在“安全”里修改两边密码；修改后，下次启动窗口会显示新密码。
 
+如果忘记密码，不要删除 `data/store.json`。直接双击：
+
+```text
+reset-passwords-only.cmd
+```
+
+它只会重置宝宝/宝贝密码并清空设备绑定，菜单、菜品、价格、图片和订单都会保留。
+
 ## 性能架构
 
 菜品图片不会再写进 `data/store.json`，会保存为独立文件：
